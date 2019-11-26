@@ -68,19 +68,26 @@ class PodnnModel:
 
         n_st = n_s * self.n_t
 
-        X_v = np.zeros((n_st, mu_min.shape[0]))
+        n_d = mu_min.shape[0]
+        if self.has_t:
+            n_d += 1
+
+        X_v = np.zeros((n_st, n_d))
 
         # Creating the time steps
         t = np.linspace(t_min, t_max, self.n_t)
         tT = t.reshape((self.n_t, 1))
 
         for i in tqdm(range(n_s)):
-            # Getting the snapshot times indices
-            s = self.n_t * i
-            e = self.n_t * (i + 1)
+            if self.has_t:
+                X_v[s:e, :] = mu_lhs[i]
+            else:
+                # Getting the snapshot times indices
+                s = self.n_t * i
+                e = self.n_t * (i + 1)
 
-            # Setting the regression inputs (t, mu)
-            X_v[s:e, :] = np.hstack((tT, np.ones_like(tT)*mu_lhs[i]))
+                # Setting the regression inputs (t, mu)
+                X_v[s:e, :] = np.hstack((tT, np.ones_like(tT)*mu_lhs[i]))
         return X_v
 
     def create_snapshots(self, n_s, n_st, n_d, n_h, u, mu_lhs,
@@ -159,7 +166,9 @@ class PodnnModel:
         n_st = n_s * self.n_t
 
         # Number of input in time (1) + number of params
-        n_d = 1 + mu_min.shape[0]
+        n_d = mu_min.shape[0]
+        if self.has_t:
+            n_d += 1
 
         # Number of DOFs
         n_h = self.n_v * self.n_xyz

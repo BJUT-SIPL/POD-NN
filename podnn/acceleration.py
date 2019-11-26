@@ -32,12 +32,15 @@ def loop_u(u, n_s, n_t, n_v, n_xyz, n_h,
 
     # pylint: disable=not-an-iterable
     for i in prange(n_s):
-        # Getting the snapshot times indices
-        s = n_t * i
-        e = n_t * (i + 1)
+        if n_t == 1:
+            X_v[i, :] = mu_lhs[i]
+        else:
+            # Getting the snapshot times indices
+            s = n_t * i
+            e = n_t * (i + 1)
 
-        # Setting the regression inputs (t, mu)
-        X_v[s:e, :] = np.hstack((tT, np.ones_like(tT)*mu_lhs[i]))
+            # Setting the regression inputs (t, mu)
+            X_v[s:e, :] = np.hstack((tT, np.ones_like(tT)*mu_lhs[i]))
 
         # Calling the analytical solution function
         Ui = np.zeros((n_v, n_xyz, n_t))
