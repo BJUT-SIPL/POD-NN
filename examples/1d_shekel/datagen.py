@@ -22,10 +22,10 @@ def u(X, _, mu):
     bet = mu[:10]
     gam = mu[10:]
 
-    u_sum = np.zeros_like(x)
+    u_sum = np.zeros((1, x.shape[0]))
     for i in range(len(bet)):
         i_sum = (x - gam[i])**2
-        u_sum += 1 / (bet[i] + i_sum)
+        u_sum[0] += 1 / (bet[i] + i_sum)
 
     return u_sum
 
@@ -35,11 +35,13 @@ class ShekelTestGenerator(TestGenerator):
         dirname = "data"
         print(f"Reading data to {dirname}")
         x = np.load(os.path.join(dirname, X_FILE)).reshape((300,))
+
+        # u are (n_v, n_x, n_t) = (1, n_x, 1)
         u_mean = np.load(os.path.join(dirname, U_MEAN_FILE))
         u_std = np.load(os.path.join(dirname, U_STD_FILE))
-        # Keeping just the first coordinate (1D)
-        u_mean = u_mean[0, :]
-        u_std = u_std[0, :]
+        # Keeping just the first coordinate (1D), and the only time step
+        u_mean = u_mean[0, :, 0]
+        u_std = u_std[0, :, 0]
 
         fig = plt.figure(figsize=figsize(1, 2, 2.0))
         ax_mean = fig.add_subplot(1, 2, 1)

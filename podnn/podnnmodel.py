@@ -11,7 +11,7 @@ import numba as nb
 from .pod import get_pod_bases
 from .handling import pack_layers
 from .logger import Logger
-from .acceleration import loop_vdot, loop_vdot_t, loop_u, loop_u_t, lhs
+from .acceleration import loop_vdot, loop_u, lhs
 
 
 SETUP_DATA_NAME = "setup_data.pkl"
@@ -30,7 +30,7 @@ class PodnnModel:
         self.n_h = self.n_v * x_mesh.shape[0]
         # Number of time steps
         self.n_t = n_t
-        self.has_t = self.n_t > 0
+        self.has_t = self.n_t > 1
 
         self.save_dir = save_dir
         self.setup_data_path = os.path.join(save_dir, SETUP_DATA_NAME)
@@ -58,39 +58,33 @@ class PodnnModel:
         mu_lhs = mu_min + (mu_max - mu_min)*X_lhs
         return mu_lhs
 
-    def generate_hifi_inputs(self, n_s, mu_min, mu_max, t_min=0, t_max=0):
+    # TODO: parallelize
+    def generate_hifi_inputs(self, n_s, mu_min, mu_max, t_min=0., t_max=0.):
         """Return large inputs to be used in a HiFi prediction task."""
-        if self.has_t:
-            t_min, t_max = np.array(t_min), np.array(t_max)
+
         mu_min, mu_max = np.array(mu_min), np.array(mu_max)
 
         mu_lhs = self.sample_mu(n_s, mu_min, mu_max)
 
-        n_st = n_s
-        if self.has_t:
-            n_st *= self.n_t
+        n_st = n_s * self.n_t
 
         X_v = np.zeros((n_st, mu_min.shape[0]))
 
-        if self.has_t:
-            # Creating the time steps
-            t = np.linspace(t_min, t_max, self.n_t)
-            tT = t.reshape((self.n_t, 1))
+        # Creating the time steps
+        t = np.linspace(t_min, t_max, self.n_t)
+        tT = t.reshape((self.n_t, 1))
 
-            for i in tqdm(range(n_s)):
-                # Getting the snapshot times indices
-                s = self.n_t * i
-                e = self.n_t * (i + 1)
+        for i in tqdm(range(n_s)):
+            # Getting the snapshot times indices
+            s = self.n_t * i
+            e = self.n_t * (i + 1)
 
-                # Setting the regression inputs (t, mu)
-                X_v[s:e, :] = np.hstack((tT, np.ones_like(tT)*mu_lhs[i]))
-        else:
-            for i in tqdm(range(n_s)):
-                X_v[i, :] = mu_lhs[i]
+            # Setting the regression inputs (t, mu)
+            X_v[s:e, :] = np.hstack((tT, np.ones_like(tT)*mu_lhs[i]))
         return X_v
 
     def create_snapshots(self, n_s, n_st, n_d, n_h, u, mu_lhs,
-                         t_min=0, t_max=0):
+                         t_min=0., t_max=0.):
         """Create a generated snapshots matrix and inputs for benchmarks."""
         n_xyz = self.x_mesh.shape[0]
 
@@ -100,16 +94,16 @@ class PodnnModel:
         # Getting the nodes coordinates
         X = self.x_mesh[:, 1:].T
 
+        # Creating the time steps
+        t = np.linspace(t_min, t_max, self.n_t)
+
         # Declaring the common output arrays
         X_v = np.zeros((n_st, n_d))
         U = np.zeros((n_h, n_st))
 
-        if self.has_t:
-            U_struct = np.zeros((n_h, self.n_t, n_s))
-            return loop_u_t(u, n_s, self.n_t, self.n_v, n_xyz, n_h,
-                            X_v, U, U_struct, X, mu_lhs, t_min, t_max)
-
-        return loop_u(u, n_s, X_v, U, X, mu_lhs)
+        U_struct = np.zeros((n_h, self.n_t, n_s))
+        return loop_u(u, n_s, self.n_t, self.n_v, n_xyz, n_h,
+                        X_v, U, U_struct, X, mu_lhs, t)
 
     def convert_dataset(self, u_mesh, X_v, train_val_ratio, eps, eps_init=None,
                         use_cache=False):
@@ -121,7 +115,6 @@ class PodnnModel:
         n_h = n_xyz * self.n_v
         n_s = X_v.shape[0]
 
-        # U = u_mesh.reshape(n_h, n_st)
         # Reshaping manually
         U = np.zeros((n_h, n_s))
         for i in range(n_s):
@@ -132,7 +125,6 @@ class PodnnModel:
         # Getting the POD bases, with u_L(x, mu) = V.u_rb(x, mu) ~= u_h(x, mu)
         # u_rb are the reduced coefficients we're looking for
         if eps_init is not None and self.has_t:
-            # Never tested
             n_s = int(n_s / self.n_t)
             self.V = get_pod_bases(U.reshape((n_h, self.n_t, n_s)),
                                    eps, eps_init_step=eps_init)
@@ -161,22 +153,16 @@ class PodnnModel:
         if use_cache:
             return self.load_train_data()
 
-        # if self.has_t:
-        #     t_min, t_max = np.array(t_min), np.array(t_max)
         mu_min, mu_max = np.array(mu_min), np.array(mu_max)
 
         # Total number of snapshots
-        n_st = n_s
-        if self.has_t:
-            n_st *= self.n_t
+        n_st = n_s * self.n_t
 
         # Number of input in time (1) + number of params
-        n_d = mu_min.shape[0]
-        if self.has_t:
-            n_d += 1
+        n_d = 1 + mu_min.shape[0]
 
         # Number of DOFs
-        n_h = self.n_v * self.x_mesh.shape[0]
+        n_h = self.n_v * self.n_xyz
 
         # LHS sampling (first uniform, then perturbated)
         print("Doing the LHS sampling on the non-spatial params...")
@@ -238,7 +224,6 @@ class PodnnModel:
             kernel_initializer="glorot_normal",
             kernel_regularizer=tf.keras.regularizers.l2(reg_lam)))
 
-        # optimizer = tf.keras.optimizers.Adam(lr=1e-1, decay=1e-2)
         optimizer = tf.keras.optimizers.Adam(lr=lr, decay=decay)
 
         self.regnn.compile(loss='mse',
@@ -282,29 +267,20 @@ class PodnnModel:
 
     def restruct(self, U):
         """Restruct the snapshots matrix DOFs/space-wise and time/snapshots-wise."""
-        if self.has_t:
-            # (n_h, n_st) -> (n_v, n_xyz, n_t, n_s)
-            n_s = int(U.shape[-1] / self.n_t)
-            U_struct = np.zeros((self.n_v, U.shape[0], self.n_t, n_s))
-            for i in range(n_s):
-                s = self.n_t * i
-                e = self.n_t * (i + 1)
-                U_struct[:, :, :, i] = U[:, s:e].reshape(self.get_u_tuple())
-            return U_struct
-
-        # (n_h, n_s) -> (n_v, n_xyz, n_s)
-        n_s = U.shape[-1]
-        U_struct = np.zeros((self.get_u_tuple() + (n_s,)))
+        # TODO: make docstring multiline
+        # (n_h, n_st) -> (n_v, n_xyz, n_t, n_s)
+        n_s = int(U.shape[-1] / self.n_t)
+        U_struct = np.zeros((self.n_v, U.shape[0], self.n_t, n_s))
         for i in range(n_s):
-            U_struct[:, :, i] = U[:, i].reshape(self.get_u_tuple())
+            s = self.n_t * i
+            e = self.n_t * (i + 1)
+            U_struct[:, :, :, i] = U[:, s:e].reshape(self.get_u_tuple())
         return U_struct
 
     def get_u_tuple(self):
         """Return solution shape."""
-        tup = (self.n_xyz,)
-        if self.has_t:
-            tup += (self.n_t,)
-        return (self.n_v,) + tup
+        # TODO: think about whether or not the method is useful
+        return (self.n_v, self.n_xyz, self.n_t)
 
     def predict_v(self, X_v):
         """Returns the predicted POD projection coefficients."""
@@ -325,22 +301,13 @@ class PodnnModel:
         """Returns the predicted solutions, via proj coefficients (large inputs)."""
         v_pred_hifi = self.predict_v(X_v)
 
-        n_s = X_v.shape[0]
-
-        if self.has_t:
-            n_s = int(n_s / self.n_t)
-            U_tot = np.zeros((self.n_h, self.n_t))
-            U_tot_sq = np.zeros((self.n_h, self.n_t))
-            U_tot, U_tot_sq = loop_vdot_t(n_s, self.n_t, U_tot, U_tot_sq, self.V, v_pred_hifi)
-        else:
-            U_tot = np.zeros((self.n_h,))
-            U_tot_sq = np.zeros((self.n_h,))
-            U_tot, U_tot_sq = loop_vdot(n_s, U_tot, U_tot_sq, self.V, v_pred_hifi)
-
-        # Getting the mean and std
+        # Doing a parallelized dot product
+        n_s = int(X_v.shape[0] / self.n_t)
+        U_tot = np.zeros((self.n_h, self.n_t))
+        U_tot_sq = np.zeros((self.n_h, self.n_t))
+        U_tot, U_tot_sq = loop_vdot(n_s, self.n_t, U_tot, U_tot_sq, self.V, v_pred_hifi)
         U_pred_hifi_mean = U_tot / n_s
         U_pred_hifi_std = np.sqrt((n_s*U_tot_sq - U_tot**2) / (n_s*(n_s - 1)))
-        # Making sure the std has non NaNs
         U_pred_hifi_std = np.nan_to_num(U_pred_hifi_std)
 
         return U_pred_hifi_mean, U_pred_hifi_std

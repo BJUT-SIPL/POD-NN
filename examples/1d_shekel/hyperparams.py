@@ -12,13 +12,13 @@ HP["n_x"] = 300
 HP["x_min"] = 0.
 HP["x_max"] = 10.
 # Time
-HP["n_t"] = 0
+HP["n_t"] = 1
 # Snapshots count
 HP["n_s"] = 1000
 HP["n_s_hifi"] = int(1e6)
+HP["n_s_hifi"] = int(1e3)
 # POD stopping param
 HP["eps"] = 1e-10
-HP["eps_init"] = 1e-10
 # Train/val split
 HP["train_val_ratio"] = 0.5
 # Deep NN hidden layers topology

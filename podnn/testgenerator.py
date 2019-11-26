@@ -20,7 +20,7 @@ HP_FILE = "HP.txt"
 
 
 class TestGenerator:
-    def __init__(self, u, n_v, n_x, n_y=0, n_z=0, n_t=0):
+    def __init__(self, u, n_v, n_x, n_y=0, n_z=0, n_t=1):
         self.u = u
         self.n_v = n_v
         self.n_x = n_x
@@ -29,7 +29,7 @@ class TestGenerator:
         self.n_t = n_t
         self.has_y = n_y > 0
         self.has_z = n_z > 0
-        self.has_t = n_t > 0
+        self.has_t = n_t > 1
 
     def plot(self):
         """Equation-specific plot function, to be implemented to one's needs."""
@@ -45,11 +45,8 @@ class TestGenerator:
         return tup
 
     def get_u_tuple(self):
-        """Get the shape of the solution domain, includes space (and time)."""
-        tup = self.get_x_tuple()
-        if self.has_t:
-            tup += (self.n_t,)
-        return (self.n_v,) + tup
+        """Get the shape of the solution domain, includes space and time."""
+        return (self.n_v,) + self.get_x_tuple() + (self.n_t,)
 
     def computeParallel(self, n_s, U_tot, U_tot_sq, X, t, mu_lhs):
         n_t = self.n_t
@@ -60,7 +57,7 @@ class TestGenerator:
             pbar.update(1)
 
         @jit(nopython=True, parallel=True)
-        def loop_t(n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs):
+        def loop(n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs):
             for i in prange(n_s):
                 # Computing one snapshot
                 U = np.zeros_like(U_tot)
@@ -74,22 +71,7 @@ class TestGenerator:
                     bumpBar()
             return U_tot, U_tot_sq
         
-        @jit(nopython=True, parallel=True)
-        def loop(n_s, U_tot, U_tot_sq, X, mu_lhs):
-            for i in prange(n_s):
-                # Computing one snapshot
-                U = u(X, 0, mu_lhs[i, :])
-                # Building the sum and the sum of squaes
-                U_tot += U
-                U_tot_sq += U**2
-                with objmode():
-                    bumpBar()
-            return U_tot, U_tot_sq
-        
-        if self.has_t:
-            U_tot, U_tot_sq = loop_t(n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs)
-        else: 
-            U_tot, U_tot_sq = loop(n_s, U_tot, U_tot_sq, X, mu_lhs)
+        U_tot, U_tot_sq = loop(n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs)
 
         with objmode():
             pbar.close()
@@ -100,11 +82,8 @@ class TestGenerator:
         for i in tqdm(range(n_s)):
             # Computing one snapshot
             U = np.zeros_like(U_tot)
-            if self.has_t:
-                for j in range(self.n_t):
-                    U[:, j] = self.u(X, t[j], mu_lhs[i, :])
-            else:
-                U = self.u(X, 0, mu_lhs[i, :])
+            for j in range(self.n_t):
+                U[:, j] = self.u(X, t[j], mu_lhs[i, :])
 
             # Building the sum and the sum of squaes
             U_tot += U
@@ -113,8 +92,8 @@ class TestGenerator:
         return U_tot, U_tot_sq
 
     def generate(self, n_s, mu_min, mu_max, x_min, x_max,
-                y_min=0, y_max=0, z_min=0, z_max=0,
-                t_min=0, t_max=0, parallel=False):
+                y_min=0., y_max=0., z_min=0., z_max=0.,
+                t_min=0., t_max=0., parallel=False):
         """Generate a hifi-test solution of the problem's equation."""
         mu_min, mu_max = np.array(mu_min), np.array(mu_max)
 
@@ -128,30 +107,22 @@ class TestGenerator:
         n_xyz = x_mesh.shape[0]
 
         # Generating time steps
-        t = None
-        if self.has_t:
-            t = np.linspace(t_min, t_max, self.n_t)
+        t = np.linspace(t_min, t_max, self.n_t)
 
         # Number of DOFs and of non-spatial params
         n_h = self.n_v * n_xyz
         n_p = mu_min.shape[0]
 
         # Number of inputs (time + number of non-spatial params)
-        n_d = n_p
-        if self.has_t:
-            n_d += 1
+        n_d = 1 + n_p
 
         # Lower and upper bound
         lb = mu_min
         ub = mu_max
 
         # The sum and sum of squares recipient vectors
-        if self.has_t:
-            U_tot = np.zeros((n_h, self.n_t))
-            U_tot_sq = np.zeros((n_h, self.n_t))
-        else:
-            U_tot = np.zeros((n_h,))
-            U_tot_sq = np.zeros((n_h,))
+        U_tot = np.zeros((n_h, self.n_t))
+        U_tot_sq = np.zeros((n_h, self.n_t))
 
         # Parameters sampling
         X_mu = lhs(n_s, n_p).T
@@ -182,8 +153,7 @@ class TestGenerator:
         dirname = "data" 
         print(f"Saving data to {dirname}")
         np.save(os.path.join(dirname, X_FILE), X_out)
-        if self.has_t:
-            np.save(os.path.join(dirname, T_FILE), t)
+        np.save(os.path.join(dirname, T_FILE), t)
         np.save(os.path.join(dirname, U_MEAN_FILE), U_test_mean)
         np.save(os.path.join(dirname, U_STD_FILE), U_test_std)
 

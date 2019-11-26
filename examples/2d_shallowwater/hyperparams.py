@@ -9,7 +9,7 @@ HP["mesh_idx"] = ([0], [1, 2], [4, 6, 7])
 # Dimension of u(x, t, mu)
 HP["n_v"] = len(HP["mesh_idx"][2])
 # Time
-HP["n_t"] = 0
+HP["n_t"] = 1
 # Snapshots count
 HP["n_s"] = 300
 # HP["n_s"] = 100

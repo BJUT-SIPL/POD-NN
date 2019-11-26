@@ -15,7 +15,7 @@ HP["n_y"] = 400
 HP["y_min"] = -5.
 HP["y_max"] = +5.
 # Time
-HP["n_t"] = 0
+HP["n_t"] = 1
 # Snapshots count
 HP["n_s"] = 1000
 HP["n_s_hifi"] = int(1e6)

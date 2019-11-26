@@ -31,6 +31,7 @@ def get_pod_bases(U, eps=1e-10, eps_init_step=None):
     return perform_pod(U, eps)
 
 def perform_pod(U, eps, verbose=True):
+    """Returns the reduced POD bases via the SVD algorithm."""
     # Number of DOFs
     n_h = U.shape[0]
 
