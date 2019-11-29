@@ -96,3 +96,27 @@ def lhs(n, samples):
         H[:, j] = rdpoints[order, j]
 
     return H
+
+
+@jit(nopython=True, parallel=True)
+def loop_u_meanstd_t(u, n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs):
+    for i in prange(n_s):
+        # Computing one snapshot
+        U = np.zeros_like(U_tot)
+        for j in prange(n_t):
+            U[:, :, j] = u(X, t[j], mu_lhs[i, :])
+        # Building the sum and the sum of squaes
+        U_tot += U
+        U_tot_sq += U**2
+    return U_tot, U_tot_sq
+
+
+@jit(nopython=True, parallel=True)
+def loop_u_meanstd(u, n_s, U_tot, U_tot_sq, X, mu_lhs):
+    for i in prange(n_s):
+        # Computing one snapshot
+        U = u(X, 0, mu_lhs[i, :])
+        # Building the sum and the sum of squaes
+        U_tot += U
+        U_tot_sq += U**2
+    return U_tot, U_tot_sq

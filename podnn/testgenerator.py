@@ -3,13 +3,14 @@
 import sys
 import time
 import os
+import time
 import yaml
 from tqdm.auto import tqdm
 import numpy as np
 import numba as nb
 from numba import objmode, jit, prange
 
-from .acceleration import lhs
+from .acceleration import lhs, loop_u_meanstd, loop_u_meanstd_t
 from .mesh import create_linear_mesh
 
 X_FILE = "X.npy"
@@ -50,67 +51,6 @@ class TestGenerator:
         if self.has_t:
             tup += (self.n_t,)
         return (self.n_v,) + tup
-
-    def computeParallel(self, n_s, U_tot, U_tot_sq, X, t, mu_lhs):
-        n_t = self.n_t
-        # u = nb.njit(self.u)
-        u = self.u
-
-        pbar = tqdm(total=n_s)
-        def bumpBar():
-            pbar.update(1)
-
-        # @jit(nopython=True, parallel=True)
-        def loop_t(n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs):
-            for i in prange(n_s):
-                # Computing one snapshot
-                U = np.zeros_like(U_tot)
-                for j in prange(n_t):
-                    U[:, :, j] = u(X, t[j], mu_lhs[i, :])
-                # Building the sum and the sum of squaes
-                U_tot += U
-                U_tot_sq += U**2
-                with objmode():
-                    bumpBar()
-            return U_tot, U_tot_sq
-        
-        # @jit(nopython=True, parallel=True)
-        def loop(n_s, U_tot, U_tot_sq, X, mu_lhs):
-            for i in prange(n_s):
-                # Computing one snapshot
-                U = u(X, 0, mu_lhs[i, :])
-                # Building the sum and the sum of squaes
-                U_tot += U
-                U_tot_sq += U**2
-                with objmode():
-                    bumpBar()
-            return U_tot, U_tot_sq
-        
-        if self.has_t:
-            U_tot, U_tot_sq = loop_t(n_s, n_t, U_tot, U_tot_sq, X, t, mu_lhs)
-        else:
-            U_tot, U_tot_sq = loop(n_s, U_tot, U_tot_sq, X, mu_lhs)
-
-        with objmode():
-            pbar.close()
-        
-        return U_tot, U_tot_sq
-
-    def compute(self, n_s, U_tot, U_tot_sq, X, t, mu_lhs):
-        for i in tqdm(range(n_s)):
-            # Computing one snapshot
-            U = np.zeros_like(U_tot)
-            if self.has_t:
-                for j in range(self.n_t):
-                    U[:, :, j] = self.u(X, t[j], mu_lhs[i, :])
-            else:
-                U = self.u(X, 0, mu_lhs[i, :])
-
-            # Building the sum and the sum of squaes
-            U_tot += U
-            U_tot_sq += U**2
-
-        return U_tot, U_tot_sq
 
     def generate(self, n_s, mu_min, mu_max, x_min, x_max,
                 y_min=0, y_max=0, z_min=0, z_max=0,
@@ -153,10 +93,15 @@ class TestGenerator:
         mu_lhs = mu_min + (mu_max - mu_min)*X_lhs
 
         # Going through the snapshots one by one without saving them
-        if parallel:
-            U_tot, U_tot_sq = self.computeParallel(n_s, U_tot, U_tot_sq, X, t, mu_lhs)
+        print("Computing...")
+        st = time.time()
+        if self.has_t:
+            U_tot, U_tot_sq = loop_u_meanstd_t(self.u, n_s, n_t, U_tot, U_tot_sq,
+                                               X, t, mu_lhs)
         else:
-            U_tot, U_tot_sq = self.compute(n_s, U_tot, U_tot_sq, X, t, mu_lhs)
+            U_tot, U_tot_sq = loop_u_meanstd(self.u, n_s, U_tot, U_tot_sq,
+                                             X, mu_lhs)
+        print(f"Finished looping in {time.time() - st:.4f} sec.\n")
 
         # Recreating the mean and the std
         U_test_mean = U_tot / n_s

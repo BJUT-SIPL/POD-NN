@@ -5,6 +5,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from numba import jit
 
 sys.path.append(os.path.join("..", ".."))
 from podnn.plotting import figsize, openPdfGraph
@@ -16,7 +17,7 @@ from hyperparams import HP
 # HiFi sampling size
 n_s = HP["n_s_hifi"]
 
-
+@jit(nopython=True, parallel=True)
 def u(X, _, mu):
     x = X[0]
     y = X[1]
