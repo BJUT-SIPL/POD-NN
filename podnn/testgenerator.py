@@ -8,7 +8,7 @@ import yaml
 from tqdm.auto import tqdm
 import numpy as np
 import numba as nb
-from numba import objmode, jit, prange
+from numba import objmode, jit, prange, typeof
 
 from .acceleration import lhs, loop_u_meanstd, loop_u_meanstd_t
 from .mesh import create_linear_mesh
@@ -22,6 +22,10 @@ HP_FILE = "HP.txt"
 
 class TestGenerator:
     def __init__(self, u, n_v, n_x, n_y=0, n_z=0, n_t=0):
+        print(u)
+        print(typeof(u))
+        print(u)
+        exit(0)
         self.u = u
         self.n_v = n_v
         self.n_x = n_x
